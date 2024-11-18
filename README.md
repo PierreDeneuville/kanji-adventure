@@ -93,7 +93,7 @@ const RARITY_WEIGHTS = {
 ## 🚀 Getting Started
 
 ### Play Now
-1. Visit [Game URL will be added soon :)]
+1. Visit https://kanji-adventure.netlify.app
 2. Use arrow keys to move
 3. Explore and survive!
 
@@ -111,7 +111,7 @@ git clone https://github.com/yourusername/kanjis-adventure.git
 - [ ] More item varieties
 - [ ] Advanced combat mechanics
 - [ ] Boss battles
-- [ ] Sound effects and music
+- [ ] Walls, Rooms, and corridors
 
 ## 🤝 Contributing
 Contributions are welcome! Feel free to:
@@ -120,9 +120,7 @@ Contributions are welcome! Feel free to:
 3. Submit a pull request
 
 ## 🙏 Acknowledgments
-- Game design inspired by classic roguelikes
-- Emoji assets used for characters and items
-- [Any other acknowledgments]
+- Game design inspired by Motion Twin's Kanji Adventure proposend in KadoKado back in good ol' times :D
 
 ---
-Made with ❤️ by [Your Name]
+Made with ❤️ by ClaudeAI and myself
