@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanji's Adventure</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+        }
+        #game-container {
+            text-align: center;
+            background-color: #34495e;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            width: 460px;
+        }
+        #game-board {
+            display: inline-grid;
+            grid-template-columns: repeat(9, 40px);
+            grid-gap: 1px;
+            background-color: #2c3e50;
+            border: 2px solid #3498db;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+        .cell {
+            width: 40px;
+            height: 40px;
+            background-color: #ecf0f1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 32px;
+            border-radius: 3px;
+            transition: background-color 0.3s ease;
+        }
+        .cell:hover {
+            background-color: #bdc3c7;
+        }
+        #status, #score, #inventory {
+            margin-top: 10px;
+            font-size: 16px;
+            background-color: #2c3e50;
+            padding: 10px;
+            border-radius: 5px;
+            word-wrap: break-word;
+        }
+        #combat-log {
+            margin-top: 10px;
+            font-size: 14px;
+            height: 150px;
+            overflow-y: scroll;
+            border: 1px solid #3498db;
+            padding: 10px;
+            background-color: #2c3e50;
+            border-radius: 5px;
+        }
+        #game-over {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+            z-index: 1000;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <h1>Kanji's Adventure</h1>
+        <div id="game-board"></div>
+        <div id="status"></div>
+        <div id="score"></div>
+        <div id="inventory"></div>
+        <div id="combat-log"></div>
+    </div>
+    <div id="game-over">
+        <h2>Game Over</h2>
+        <p id="game-over-reason"></p>
+        <p id="final-score"></p>
+        <button onclick="startNewGame()">Start New Game</button>
+    </div>
+    <script>
+        const BOARD_SIZE = 9;
+        const PLAYER_CHAR = '🥷';
+        const MONSTER_CHARS = ['👻', '👺', '🔥', '💀', '🧙'];
+        const ITEM_CHARS = ['🍖', '🍎', '🪙', '🗡️', '⚔️', '🔰', '🛡️', '🟢', '🔵', '🔴', '🧪'];
+        const STAIRS_UP = '⬆️';
+        const STAIRS_DOWN = '⬇️';
+
+        let player = {};
+        let monsters = [];
+        let items = [];
+        let inCombat = false;
+        let currentMonster = null;
+        let score = 0;
+        let currentLevel = 0;
+        let levels = [];
+
+        const RARITY_WEIGHTS = {
+            common: 50,
+            uncommon: 30,
+            rare: 15,
+            very_rare: 4,
+            legendary: 1
+        };
+
+        const ITEM_TYPES = [
+            { name: 'Coins', char: '🪙', rarity: 'common', effect: (amount) => { player.coins += amount; } },
+            { name: 'Apple', char: '🍎', rarity: 'common', effect: () => { player.energy = Math.min(player.maxEnergy, player.energy + 50); } },
+            { name: 'Meat', char: '🍖', rarity: 'uncommon', effect: () => { player.energy = Math.min(player.maxEnergy, player.energy + 100); } },
+            { name: 'Knife', char: '🗡️', rarity: 'uncommon', effect: () => { player.weapon = { name: 'Knife', damage: 3 }; } },
+            { name: 'Leather Armor', char: '🔰', rarity: 'rare', effect: () => { player.armor = { name: 'Leather Armor', defense: 1 }; } },
+            { name: 'Iron Armor', char: '🛡️', rarity: 'very_rare', effect: () => { player.armor = { name: 'Iron Armor', defense: 2 }; } },
+            { name: 'Katana', char: '⚔️', rarity: 'very_rare', effect: () => { player.weapon = { name: 'Katana', damage: 5 }; } },
+            { name: 'Emerald', char: '🟢', rarity: 'rare', effect: () => { score += 1000; } },
+            { name: 'Sapphire', char: '🔵', rarity: 'very_rare', effect: () => { score += 3000; } },
+            { name: 'Ruby', char: '🔴', rarity: 'legendary', effect: () => { score += 8000; } },
+            { name: 'Small Potion', char: '🧪', rarity: 'very_rare', effect: () => { 
+                const healAmount = Math.min(8, player.maxHealth - player.health);
+                player.health += healAmount;
+                logCombat(`You used a Small Potion and restored ${healAmount} HP!`);
+            }}
+        ];
+
+        const MONSTER_TYPES = [
+            { name: 'Ghost', char: '👻', rarity: 'common', health: 3, maxDamage: 2, points: 250, loot: ['Coins', 'Apple'] },
+            { name: 'Goblin', char: '👺', rarity: 'common', health: 5, maxDamage: 3, points: 500, loot: ['Coins', 'Meat', 'Knife'] },
+            { name: 'Fire Imp', char: '🔥', rarity: 'uncommon', health: 3, maxDamage: 2, points: 750, loot: ['Coins', 'Emerald'], chaser: true },
+            { name: 'Skeleton', char: '💀', rarity: 'rare', health: 4, maxDamage: 5, points: 1000, loot: ['Coins', 'Leather Armor', 'Sapphire'] },
+            { name: 'Shaman', char: '🧙', rarity: 'very_rare', health: 10, maxDamage: 5, points: 1250, loot: ['Coins', 'Iron Armor', 'Ruby'] }
+        ];
+
+        function chooseByRarity(items) {
+            const totalWeight = Object.values(RARITY_WEIGHTS).reduce((sum, weight) => sum + weight, 0);
+            let randomWeight = Math.random() * totalWeight;
+            
+            for (const rarity in RARITY_WEIGHTS) {
+                if (randomWeight < RARITY_WEIGHTS[rarity]) {
+                    const itemsOfRarity = items.filter(item => item.rarity === rarity);
+                    return itemsOfRarity[Math.floor(Math.random() * itemsOfRarity.length)];
+                }
+                randomWeight -= RARITY_WEIGHTS[rarity];
+            }
+
+            // Fallback to a random item if something goes wrong
+            return items[Math.floor(Math.random() * items.length)];
+        }
+
+        function generateLevels(numLevels) {
+            let generatedLevels = [];
+            for (let i = 0; i < numLevels; i++) {
+                let level = {
+                    monsters: [],
+                    items: [],
+                    stairsUp: i < numLevels - 1 ? { x: 0, y: 0 } : null,
+                    stairsDown: i > 0 ? { x: 0, y: 0 } : null
+                };
+
+                // Place stairs 
+                if (level.stairsUp) {
+                    level.stairsUp.x = Math.floor(Math.random() * BOARD_SIZE);
+                    level.stairsUp.y = Math.floor(Math.random() * BOARD_SIZE);
+                }
+                if (level.stairsDown) {
+                    do {
+                        level.stairsDown.x = Math.floor(Math.random() * BOARD_SIZE);
+                        level.stairsDown.y = Math.floor(Math.random() * BOARD_SIZE);
+                    } while (level.stairsUp && level.stairsUp.x === level.stairsDown.x && level.stairsUp.y === level.stairsDown.y);
+                }
+
+                // Generate monsters
+                for (let j = 0; j < 5 + i; j++) {
+                    let x, y;
+                    do {
+                        x = Math.floor(Math.random() * BOARD_SIZE);
+                        y = Math.floor(Math.random() * BOARD_SIZE);
+                    } while (isOccupied(level, x, y));
+                    const monster = chooseByRarity(MONSTER_TYPES);
+                    level.monsters.push({ ...monster, x, y });
+                }
+
+                // Generate items
+                for (let j = 0; j < 7; j++) {
+                    let x, y;
+                    do {
+                        x = Math.floor(Math.random() * BOARD_SIZE);
+                        y = Math.floor(Math.random() * BOARD_SIZE);
+                    } while (isOccupied(level, x, y));
+                    const item = chooseByRarity(ITEM_TYPES);
+                    if (item.name === 'Coins') {
+                        const coinAmount = Math.floor(Math.random() * 24) + 2;
+                        level.items.push({ ...item, x, y, amount: coinAmount });
+                    } else {
+                        level.items.push({ ...item, x, y });
+                    }
+                }
+
+                generatedLevels.push(level);
+            }
+            return generatedLevels;
+        }
+
+        function isOccupied(level, x, y) {
+            return (level.stairsUp && level.stairsUp.x === x && level.stairsUp.y === y) ||
+                   (level.stairsDown && level.stairsDown.x === x && level.stairsDown.y === y) ||
+                   level.monsters.some(m => m.x === x && m.y === y) ||
+                   level.items.some(item => item.x === x && item.y === y);
+        }
+
+        function createBoard() {
+            const board = document.getElementById('game-board');
+            board.innerHTML = '';
+            for (let y = 0; y < BOARD_SIZE; y++) {
+                for (let x = 0; x < BOARD_SIZE; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.id = `cell-${x}-${y}`;
+                    board.appendChild(cell);
+                }
+            }
+        }
+
+        function updateLevel() {
+            createBoard();
+            monsters = levels[currentLevel].monsters;
+            items = levels[currentLevel].items;
+            
+            monsters.forEach(monster => updateCell(monster.x, monster.y, monster.char));
+            items.forEach(item => updateCell(item.x, item.y, item.char));
+            
+            if (levels[currentLevel].stairsUp) {
+                updateCell(levels[currentLevel].stairsUp.x, levels[currentLevel].stairsUp.y, STAIRS_UP);
+            }
+            if (levels[currentLevel].stairsDown) {
+                updateCell(levels[currentLevel].stairsDown.x, levels[currentLevel].stairsDown.y, STAIRS_DOWN);
+            }
+            
+            placePlayer();
+        }
+
+        function placePlayer() {
+            updateCell(player.x, player.y, PLAYER_CHAR);
+        }
+
+        function updateCell(x, y, content) {
+            const cell = document.getElementById(`cell-${x}-${y}`);
+            if (cell) cell.textContent = content;
+        }
+
+        function handleKeyPress(e) {
+            const key = e.key;
+            let newX = player.x;
+            let newY = player.y;
+
+            if (key === 'ArrowUp') newY--;
+            else if (key === 'ArrowDown') newY++;
+            else if (key === 'ArrowLeft') newX--;
+            else if (key === 'ArrowRight') newX++;
+            else return;
+
+            if (newX >= 0 && newX < BOARD_SIZE && newY >= 0 && newY < BOARD_SIZE) {
+                attemptMove(newX, newY);
+            }
+        }
+
+        function attemptMove(newX, newY) {
+            const currentLevelData = levels[currentLevel];
+            if (currentLevelData.stairsUp && newX === currentLevelData.stairsUp.x && newY === currentLevelData.stairsUp.y) {
+                changeLevel(1);
+                return;
+            }
+            if (currentLevelData.stairsDown && newX === currentLevelData.stairsDown.x && newY === currentLevelData.stairsDown.y) {
+                changeLevel(-1);
+                return;
+            }
+
+            const monsterIndex = monsters.findIndex(m => m.x === newX && m.y === newY);
+            if (monsterIndex !== -1) {
+                if (!inCombat) {
+                    inCombat = true;
+                    currentMonster = monsters[monsterIndex];
+                    logCombat(`You've encountered a ${currentMonster.name}!`);
+                }
+                combatTurn();
+            } else {
+                movePlayer(newX, newY);
+                if (inCombat) {
+                    inCombat = false;
+                    currentMonster = null;
+                    logCombat("You've escaped from combat!");
+                }
+            }
+        }
+
+        function changeLevel(direction) {
+            currentLevel += direction;
+            logCombat(`You've moved to level ${currentLevel + 1}`);
+            
+            const newLevel = levels[currentLevel];
+            const stairs = direction > 0 ? newLevel.stairsDown : newLevel.stairsUp;
+            
+            // Find the closest unoccupied cell next to the stairs
+            const adjacentCells = [
+                {x: stairs.x - 1, y: stairs.y},
+                {x: stairs.x + 1, y: stairs.y},
+                {x: stairs.x, y: stairs.y - 1},
+                {x: stairs.x, y: stairs.y + 1}
+            ];
+            
+            for (let cell of adjacentCells) {
+                if (cell.x >= 0 && cell.x < BOARD_SIZE && cell.y >= 0 && cell.y < BOARD_SIZE && !isOccupied(newLevel, cell.x, cell.y)) {
+                    player.x = cell.x;
+                    player.y = cell.y;
+                    break;
+                }
+            }
+            
+            updateLevel();
+            updateStatus();
+        }
+
+        function movePlayer(newX, newY) {
+            updateCell(player.x, player.y, '');
+            player.x = newX;
+            player.y = newY;
+            
+            if (player.energy > 0) {
+                player.energy--;
+            } else {
+                player.health--;
+                logCombat("You lost 1 HP due to exhaustion!");
+            }
+
+            const itemIndex = items.findIndex(i => i.x === newX && i.y === newY);
+            if (itemIndex !== -1) {
+                collectItem(items[itemIndex]);
+                items.splice(itemIndex, 1);
+            }
+
+            placePlayer();
+            moveMonsters();
+            updateStatus();
+            updateScore();
+
+            if (player.health <= 0) {
+                gameOver("You died from exhaustion!");
+            }
+        }
+
+        function combatTurn() {
+            const playerDamage = Math.floor(Math.random() * player.weapon.damage) + 1;
+            currentMonster.health -= playerDamage;
+            logCombat(`You hit ${currentMonster.name} for ${playerDamage} damage!`);
+
+            if (currentMonster.health <= 0) {
+                logCombat(`You defeated the ${currentMonster.name}!`);
+                score += currentMonster.points;
+                dropLoot(currentMonster);
+                const monsterIndex = monsters.findIndex(m => m.x === currentMonster.x && m.y === currentMonster.y);
+                if (monsterIndex !== -1) {
+                    monsters.splice(monsterIndex, 1);
+                }
+                inCombat = false;
+                currentMonster = null;
+            } else {
+                const monsterDamage = Math.max(0, Math.floor(Math.random() * currentMonster.maxDamage) + 1 - player.armor.defense);
+                player.health -= monsterDamage;
+                logCombat(`${currentMonster.name} hits you for ${monsterDamage} damage!`);
+                updateStatus();
+
+                if (player.health <= 0) {
+                    logCombat("You have been defeated!");
+                    gameOver(`You were killed by ${currentMonster.name}!`);
+                    return;
+                }
+            }
+            updateStatus();
+            updateScore();
+        }
+
+        function dropLoot(monster) {
+            if (monster.loot.length > 0) {
+                const possibleLoot = monster.loot.map(itemName => ITEM_TYPES.find(i => i.name === itemName)).filter(Boolean);
+                if (Math.random() < 0.1) {  // 10% chance to add Small Potion to possible loot
+                    possibleLoot.push(ITEM_TYPES.find(i => i.name === 'Small Potion'));
+                }
+                const droppedItem = chooseByRarity(possibleLoot);
+                if (droppedItem) {
+                    if (droppedItem.name === 'Coins') {
+                        const coinAmount = Math.floor(Math.random() * 24) + 2; // 2 to 25 coins
+                        logCombat(`The ${monster.name} dropped ${coinAmount} coins!`);
+                        items.push({ ...droppedItem, x: monster.x, y: monster.y, amount: coinAmount });
+                    } else {
+                        logCombat(`The ${monster.name} dropped a ${droppedItem.name}!`);
+                        items.push({ ...droppedItem, x: monster.x, y: monster.y });
+                    }
+                    updateCell(monster.x, monster.y, droppedItem.char);
+                }
+            }
+        }
+
+        function collectItem(item) {
+            if (item.name === 'Coins') {
+                const amount = item.amount || Math.floor(Math.random() * 24) + 2; // Fallback if amount is not set
+                item.effect(amount);
+                logCombat(`You collected ${amount} coins!`);
+            } else {
+                logCombat(`You collected ${item.name}!`);
+                item.effect();
+            }
+            updateStatus();
+            updateScore();
+        }
+
+        function moveMonsters() {
+            monsters.forEach(monster => {
+                if (monster.chaser) {
+                    const dx = Math.sign(player.x - monster.x);
+                    const dy = Math.sign(player.y - monster.y);
+                    const newX = monster.x + dx;
+                    const newY = monster.y + dy;
+                    if (canMonsterMove(newX, newY)) {
+                        updateCell(monster.x, monster.y, '');
+                        monster.x = newX;
+                        monster.y = newY;
+                        updateCell(monster.x, monster.y, monster.char);
+                    }
+                } else {
+                    const direction = Math.floor(Math.random() * 4);
+                    let newX = monster.x;
+                    let newY = monster.y;
+                    if (direction === 0) newY--;
+                    else if (direction === 1) newY++;
+                    else if (direction === 2) newX--;
+                    else if (direction === 3) newX++;
+
+                    if (canMonsterMove(newX, newY)) {
+                        updateCell(monster.x, monster.y, '');
+                        monster.x = newX;
+                        monster.y = newY;
+                        updateCell(monster.x, monster.y, monster.char);
+                    }
+                }
+            });
+        }
+
+        function canMonsterMove(x, y) {
+            const currentLevelData = levels[currentLevel];
+            return x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE &&
+                !(x === player.x && y === player.y) &&
+                !monsters.some(m => m.x === x && m.y === y) &&
+                !items.some(i => i.x === x && i.y === y) &&
+                !(currentLevelData.stairsUp && x === currentLevelData.stairsUp.x && y === currentLevelData.stairsUp.y) &&
+                !(currentLevelData.stairsDown && x === currentLevelData.stairsDown.x && y === currentLevelData.stairsDown.y);
+        }
+
+        function updateStatus() {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = `Level: ${currentLevel + 1} | Health: ${player.health}/${player.maxHealth} | Energy: ${player.energy}/${player.maxEnergy} | Weapon: ${player.weapon.name} | Armor: ${player.armor.name}`;
+            
+            const inventoryElement = document.getElementById('inventory');
+            inventoryElement.textContent = `Coins: ${player.coins}`;
+        }
+
+        function updateScore() {
+            const scoreElement = document.getElementById('score');
+            scoreElement.textContent = `Score: ${score}`;
+        }
+
+        function logCombat(message) {
+            const combatLog = document.getElementById('combat-log');
+            combatLog.innerHTML += message + '<br>';
+            combatLog.scrollTop = combatLog.scrollHeight;
+        }
+
+        function clearCombatLog() {
+            const combatLog = document.getElementById('combat-log');
+            combatLog.innerHTML = '';
+        }
+
+        function gameOver(reason) {
+            document.removeEventListener('keydown', handleKeyPress);
+            const gameOverElement = document.getElementById('game-over');
+            const gameOverReasonElement = document.getElementById('game-over-reason');
+            const finalScoreElement = document.getElementById('final-score');
+            gameOverReasonElement.textContent = reason;
+            finalScoreElement.textContent = `Final Score: ${calculateFinalScore()}`;
+            gameOverElement.style.display = 'block';
+        }
+
+        function calculateFinalScore() {
+            return score + (player.coins * 20) + (player.energy * 5);
+        }
+
+        function startNewGame() {
+            const gameOverElement = document.getElementById('game-over');
+            gameOverElement.style.display = 'none';
+            initializeGame();
+        }
+
+        function initializeGame() {
+            player = { 
+                x: 4, 
+                y: 4, 
+                health: 10, 
+                maxHealth: 10,
+                energy: 30, 
+                maxEnergy: 30,
+                coins: 0,
+                weapon: { name: 'Fists', damage: 2 },
+                armor: { name: 'Cloth', defense: 0 }
+            };
+            inCombat = false;
+            currentMonster = null;
+            score = 0;
+            currentLevel = 0;
+            levels = generateLevels(10);
+            createBoard();
+            updateLevel();
+            updateStatus();
+            updateScore();
+            clearCombatLog();
+            document.addEventListener('keydown', handleKeyPress);
+        }
+
+        // Start the game when the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', initializeGame);
+
+    </script>
+</body>
+</html>
